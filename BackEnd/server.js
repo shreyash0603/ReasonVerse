@@ -7,7 +7,10 @@ import connectDB from './config/db.js';
 // import geminiEnhanceRoutes from './routes/geminiEnhance.js';
 import groqEnhanceRoutes from './routes/groqEnhance.js';
 import enhancePromptRoutes from './routes/enhancePrompt.js';
-
+import refineRoutes from './routes/refineRoutes.js';
+import multiResponseRoutes from './routes/multiResponseRoutes.js';
+import clarifyRoutes from './routes/clarifyRoutes.js';
+import sessionRoutes from './routes/sessionRoutes.js';
 dotenv.config();
 
 const app = express();
@@ -33,6 +36,10 @@ app.use('/api/auth/', authRoutes);
 
 app.use('/api/groq/', groqEnhanceRoutes);
 app.use('/api/enhance/', enhancePromptRoutes);
+app.use('/api/refine/', refineRoutes);
+app.use('/api/multi-response/', multiResponseRoutes);
+app.use('/api/clarify/', clarifyRoutes);
+app.use('/api/chat-session/', sessionRoutes);
 // app.use('/api/gemini/', geminiEnhanceRoutes);
 
 connectDB();

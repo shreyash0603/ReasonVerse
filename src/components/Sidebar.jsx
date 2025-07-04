@@ -7,7 +7,7 @@ export default function Sidebar({ open, onClose, onSelectChat }) {
   useEffect(() => {
     if (open) {
       setLoading(true);
-      fetch("http://localhost:3000/api/chat/history")
+      fetch('http://localhost:3000/api/chat/history')
         .then((res) => res.json())
         .then((data) => {
           if (data.success) setChats(data.chats);
@@ -41,7 +41,7 @@ export default function Sidebar({ open, onClose, onSelectChat }) {
                 onClick={() => onSelectChat(chat)}
               >
                 <div className="truncate font-medium text-gray-800">
-                  {chat.userMessage.slice(0, 40)}{chat.userMessage.length > 40 ? "..." : ""}
+                  {chat.userMessage.slice(0, 40)}{chat.userMessage.length > 40 ? '...' : ''}
                 </div>
                 <div className="text-xs text-gray-400">
                   {new Date(chat.timestamp).toLocaleString()}

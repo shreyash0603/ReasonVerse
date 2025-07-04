@@ -32,6 +32,7 @@ import {
   CircleDot,
   Triangle,
   Sun,
+  Pencil,
 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -40,6 +41,7 @@ import { ScratchCard } from './scratch-card';
 import { Label } from '@/components/ui/label';
 import Sidebar from './Sidebar.jsx';
 import { Header } from './header';
+import ReactMarkdown from 'react-markdown';
 
 const REWARD_AMOUNT = 10;
 const modelNames = ['Citadel-AI', 'Turing-Oracle'];
@@ -111,6 +113,28 @@ const promptBgColors: Record<string, string> = {
   custom: 'bg-[#f6edff]', // light purple
 };
 
+const modelApiNames: Record<string, string> = {
+  'OpenAI': 'openai',
+  'Groq': 'groq',
+  'Nvidia': 'nvidia',
+  'Gemini': 'gemini',
+  'OpenAi': 'openai', // handle both spellings
+};
+
+// Add types at the top or near the function
+interface Session {
+  _id: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+interface Message {
+  _id: string;
+  sessionId: string;
+  role: 'human' | 'ai';
+  content: string;
+  createdAt?: string;
+}
+
 export default function ReasoningPage() {
   const { isAuthenticated, addTokens } = useAuth();
   const { toast } = useToast();
@@ -132,6 +156,50 @@ export default function ReasoningPage() {
   const [hasEnhancedOnce, setHasEnhancedOnce] = useState(false);
   const [showFollowupInput, setShowFollowupInput] = useState(false);
   const [lastUserPrompt, setLastUserPrompt] = useState('');
+  const [refineQuestions, setRefineQuestions] = useState<{ question: string, answer: string }[]>([]);
+  const [isFetchingRefineQuestions, setIsFetchingRefineQuestions] = useState(false);
+  const [editingQuickTake, setEditingQuickTake] = useState(false);
+  const [editQuickTakeValue, setEditQuickTakeValue] = useState('');
+  const [clarifyQuestions, setClarifyQuestions] = useState<string[]>([]);
+  const [clarifyAnswers, setClarifyAnswers] = useState<string[]>([]);
+  const [clarifying, setClarifying] = useState(false);
+  const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Create a new session on first load
+  useEffect(() => {
+    const createSession = async () => {
+      const res = await fetch('http://localhost:3000/api/chat-session/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: null }), // Add userId if available
+      });
+      const data = await res.json();
+      setSessionId(data.sessionId);
+    };
+    createSession();
+  }, []);
+
+  // Fetch chat history for the session
+  useEffect(() => {
+    if (!sessionId) return;
+    const fetchMessages = async () => {
+      const res = await fetch(`http://localhost:3000/api/chat-session/session/${sessionId}/messages`);
+      const data = await res.json();
+      setChatHistory(data.map((msg: any) => ({ role: msg.role, content: msg.content })));
+    };
+    fetchMessages();
+  }, [sessionId]);
+
+  // Helper to save a message to backend
+  const saveMessage = async (role: string, content: string) => {
+    if (!sessionId) return;
+    await fetch('http://localhost:3000/api/chat-session/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, role, content }),
+    });
+  };
 
   const handleSelectResponse = (index: number) => {
     if (!isAuthenticated) {
@@ -224,12 +292,43 @@ export default function ReasoningPage() {
     setNegativeTags([]);
     setDetailedFeedback('');
     setLastUserPrompt(query);
+    setChatHistory(prev => [...prev, { role: 'human', content: query }]);
+    await saveMessage('human', query);
     // Enhance the prompt first
     const enhanced = await enhancePrompt(query, true);
     setQuickTakePrompt(enhanced);
     setHasEnhancedOnce(true);
     setEnhancing(false);
     setQuery(''); // Clear input after enhancing
+  };
+
+  const handleFollowupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim()) {
+      toast({
+        title: 'Query is empty',
+        description: 'Please enter a topic or question.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setEnhancing(true);
+    setQuickTakePrompt(null);
+    setResponses(null);
+    setSelectedCard(null);
+    setFeedback(null);
+    setPositiveTags([]);
+    setNegativeTags([]);
+    setDetailedFeedback('');
+    setLastUserPrompt(query);
+    setChatHistory(prev => [...prev, { role: 'human', content: query }]);
+    await saveMessage('human', query);
+    const enhanced = await enhancePrompt(query, true);
+    setQuickTakePrompt(enhanced);
+    setHasEnhancedOnce(true);
+    setEnhancing(false);
+    setQuery('');
+    setShowFollowupInput(false);
   };
 
   // Handler for Go Ahead (generate responses)
@@ -241,17 +340,34 @@ export default function ReasoningPage() {
     setPositiveTags([]);
     setNegativeTags([]);
     setDetailedFeedback('');
+    let llms = ['gemini', 'openai'];
+    if (selectedModel) {
+      const selected = trendingModels.find(m => m.value === selectedModel);
+      if (selected) {
+        const mainApi = modelApiNames[selected.main] || selected.main.toLowerCase();
+        const subApi = modelApiNames[selected.sub] || selected.sub.toLowerCase();
+        llms = [mainApi, subApi];
+      }
+    }
     try {
-      const res = await fetch('http://localhost:3000/api/chat/ai-response', {
+      const res = await fetch('http://localhost:3000/api/multi-response/multiResponse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: quickTakePrompt }),
+        body: JSON.stringify({
+          prompt: quickTakePrompt,
+          llms: llms
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        setResponses({ response1: data.response1, response2: data.response2 });
-        setShowFollowupInput(true); // Show follow-up input at bottom
-        setQuery(''); // Clear input after generating responses
+        const response1 = data.data.data[llms[0] + '_response'];
+        const response2 = data.data.data[llms[1] + '_response'];
+        setResponses({ response1, response2 });
+        setChatHistory(prev => [...prev, { role: 'ai', content: response1 }, { role: 'ai', content: response2 }]);
+        await saveMessage('ai', response1);
+        await saveMessage('ai', response2);
+        setShowFollowupInput(true);
+        setQuery('');
       } else {
         toast({
           title: 'AI Error',
@@ -271,8 +387,25 @@ export default function ReasoningPage() {
   };
 
   // Handler for Refine (let user edit prompt)
-  const handleRefine = () => {
+  const handleRefine = async () => {
     setRefining(true);
+    setIsFetchingRefineQuestions(true);
+    try {
+        const res = await fetch('http://localhost:3000/api/refine/refdata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: quickTakePrompt, qa_pairs: refineQuestions, context: {} }),
+      });
+      const data = await res.json();
+      if (data.qa_pairs) {
+        setRefineQuestions(data.qa_pairs.map((q: any) => ({ ...q, answer: '' })));
+      } else {
+        setRefineQuestions([]);
+      }
+    } catch (e) {
+      setRefineQuestions([]);
+    }
+    setIsFetchingRefineQuestions(false);
     setRefineValue(quickTakePrompt || '');
   };
 
@@ -283,9 +416,17 @@ export default function ReasoningPage() {
   const handleUpdateRefine = async () => {
     setEnhancing(true);
     setRefining(false);
-    // Enhance the new prompt
-    const enhanced = await enhancePrompt(refineValue, false);
-    setQuickTakePrompt(enhanced);
+    try {
+      const res = await fetch('http://localhost:3000/api/refine/refdata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: quickTakePrompt, qa_pairs: refineQuestions, context: {} }),
+      });
+      const data = await res.json();
+      setQuickTakePrompt(data.refined_prompt || refineValue);
+    } catch (e) {
+      setQuickTakePrompt(refineValue);
+    }
     setEnhancing(false);
   };
 
@@ -301,29 +442,29 @@ export default function ReasoningPage() {
       value: 'OpenAI o1-mini|Groq Deepseek',
       color: 'text-[#d12b7c]',
       icon: <Waves className="w-5 h-5 text-[#d12b7c] mr-2" />, // MiniMax
-      main: 'OpenAI o1-mini',
-      sub: 'Groq Deepseek',
+      main: 'openai',
+      sub: 'groq',
     },
     {
       value: 'Groq Deepseek|Nvidia A100',
       color: 'text-[#3b82f6]',
       icon: <CircleDot className="w-5 h-5 text-[#3b82f6] mr-2" />, // DeepSeek
-      main: 'Groq Deepseek',
-      sub: 'Nvidia A100',
+      main: 'groq',
+      sub: 'nvidia',
     },
     {
       value: 'Nvidia A100|Google Gemini 2.0',
       color: 'text-[#b3a16c]',
       icon: <Triangle className="w-5 h-5 text-[#b3a16c] mr-2" />, // FLUX
-      main: 'Nvidia A100',
-      sub: 'Google Gemini 2.0',
+      main: 'nvidia',
+      sub: 'gemini',
     },
     {
       value: 'Google Gemini 2.0|OpenAi o1-mini',
       color: 'text-[#b37c5a]',
       icon: <Sun className="w-5 h-5 text-[#b37c5a] mr-2" />, // Arcee/Claude
-      main: 'Google Gemini 2.0',
-      sub: 'OpenAi o1-mini',
+      main: 'gemini',
+      sub: 'openai',
     },
   ];
 
@@ -333,12 +474,87 @@ export default function ReasoningPage() {
     ? [selectedTrending.main, selectedTrending.sub]
     : modelNames;
 
+  // Handler for Clarify (fetch questions)
+  const handleClarify = async () => {
+    setClarifying(true);
+    setClarifyQuestions([]);
+    setClarifyAnswers([]);
+    try {
+      const res = await fetch('http://localhost:3000/api/clarify/questionClarify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: quickTakePrompt }),
+      });
+      const data = await res.json();
+      console.log('Clarify API response:', data);
+      const questions = data.questions || data.data?.questions || [];
+      setClarifyQuestions(questions);
+      setClarifyAnswers(questions.map(() => ''));
+    } catch (e) {
+      setClarifyQuestions([]);
+      setClarifyAnswers([]);
+    }
+  };
+
+  const handleClarifyAnswerChange = (idx: number, value: string) => {
+    setClarifyAnswers(prev => {
+      const updated = [...prev];
+      updated[idx] = value;
+      return updated;
+    });
+  };
+
+  const handleRefineSubmit = async () => {
+    setRefining(true);
+    try {
+      const qa_pairs = clarifyQuestions.map((q, idx) => ({
+        question: q,
+        answer: clarifyAnswers[idx] || '',
+      }));
+      const res = await fetch('http://localhost:3000/api/refine/refdata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: quickTakePrompt,
+          qa_pairs,
+          context: {},
+        }),
+      });
+      const data = await res.json();
+      console.log('Refine API response:', data);
+      setQuickTakePrompt((data.data && data.data.refined_prompt) || quickTakePrompt);
+      setClarifying(false);
+      setRefining(false);
+    } catch (e) {
+      setRefining(false);
+    }
+  };
+
+  const handleSelectSession = async (session: Session) => {
+    const res = await fetch(`http://localhost:3000/api/chat-session/session/${session._id}/messages`);
+    const messages: Message[] = await res.json();
+
+    // Find the first user message
+    const firstUserMsg = messages.find((m: Message) => m.role === 'human');
+    // Find the first two AI messages after the user message
+    const aiMessages = messages.filter((m: Message) => m.role === 'ai');
+    const response1 = aiMessages[0]?.content || '';
+    const response2 = aiMessages[1]?.content || '';
+
+    setLastUserPrompt(firstUserMsg ? firstUserMsg.content : '');
+    setQuickTakePrompt(firstUserMsg ? firstUserMsg.content : '');
+    setResponses(response1 && response2 ? { response1, response2 } : null);
+
+    // Optionally, set chatHistory for follow-ups
+    setChatHistory(messages);
+  };
+
   return (
     <div className="relative flex">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} onSelectChat={handleSelectChat} />
       <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-72' : ''}`}>
         <Header onHamburgerClick={() => setSidebarOpen((open) => !open)} />
-        <div className="container py-8">
+        <div className="container py-8 pb-32">
           <section className="text-center">
             <h1 className="text-3xl font-bold tracking-tight md:text-5xl">
               The Frontier of AI-Powered Reasoning
@@ -354,12 +570,12 @@ export default function ReasoningPage() {
                 <div className={`relative rounded-2xl border text-card-foreground shadow-sm focus-within:ring-2 focus-within:ring-ring/80 ${promptBgColors[selectedPromptType] || ''}`}>
                   <Textarea
                     placeholder="I want a prompt that will..."
-                    className="min-h-[120px] w-full resize-none border-0 bg-transparent p-4 pb-14 text-base focus-visible:ring-0"
+                    className="min-h-[120px] max-h-[300px] w-full resize-none border-0 bg-transparent p-4 pb-24 text-base focus-visible:ring-0 overflow-y-auto"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     disabled={isLoading || enhancing || !!quickTakePrompt}
                   />
-                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
+                  <div className={`absolute bottom-6 left-3 right-3 flex items-center justify-between ${promptBgColors[selectedPromptType] || 'bg-transparent'} px-2 py-1`}>
                     <div className="flex items-center">
                       <PromptTypeDropdown selected={selectedPromptType} onSelect={setSelectedPromptType} />
                       <ModelDropdown selected={selectedModel} onSelect={setSelectedModel} />
@@ -387,22 +603,26 @@ export default function ReasoningPage() {
               </form>
             )}
             {showFollowupInput && (
-              <form onSubmit={handleSubmitQuery} className="fixed left-0 right-0 bottom-8 z-50 flex justify-center pointer-events-none transition-all duration-500">
-                <div className="relative flex items-center rounded-full border border-[#3a2415] bg-[#231916] shadow-2xl px-4 py-2 w-full max-w-2xl mx-auto pointer-events-auto">
-                  {/* Model icons (optional, add logic if needed) */}
-                  <div className="flex items-center gap-2 mr-2">
-                    {/* Example icons, replace with selected model icons if desired */}
-                  </div>
+              <form
+                onSubmit={handleFollowupSubmit}
+                className="fixed left-0 right-0 bottom-0 z-50 flex justify-center pointer-events-auto transition-all duration-500 px-4 pb-4"
+              >
+                <div className="relative flex items-center w-full max-w-2xl mx-auto border border-[#3a2415] px-4 py-2 rounded-full shadow-lg bg-[#ede3db]">
                   <input
                     type="text"
                     placeholder="Ask a follow-up"
-                    className="flex-1 bg-transparent outline-none border-none text-[#e7d8ce] placeholder-[#bfa77a] text-lg px-2 py-2"
+                    className="flex-1 bg-transparent outline-none border-none text-[#3a2415] placeholder-[#bfa77a] text-lg px-2 py-2 rounded-full"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    disabled={isLoading || enhancing || !!quickTakePrompt}
+                    disabled={isLoading || enhancing}
                   />
-                  {/* Attachments or other icons can go here */}
-                  <Button type="submit" size="icon" variant="secondary" className="rounded-full ml-2 bg-[#bfa77a] hover:bg-[#e7b98a] text-[#231916]" disabled={isLoading || enhancing || !!quickTakePrompt}>
+                  <Button
+                    type="submit"
+                    size="icon"
+                    variant="secondary"
+                    className="rounded-full ml-2 bg-[#bfa77a] hover:bg-[#e7b98a] text-[#231916] flex items-center justify-center"
+                    disabled={isLoading || enhancing}
+                  >
                     <ArrowRight className="h-5 w-5" />
                   </Button>
                 </div>
@@ -420,32 +640,75 @@ export default function ReasoningPage() {
                 </div>
               </div>
               <div className="flex flex-col items-center mt-2">
-                <div className="text-[#e7b98a] text-xl font-bold mb-2 flex items-center gap-2">QuickTake <Sparkles className="inline h-5 w-5 mb-1 text-[#e7b98a]" /></div>
-                {refining ? (
-                  <>
-                    <textarea
-                      className="w-full max-w-2xl min-h-[60px] rounded-md border border-[#e7b98a] p-3 text-base mb-4 focus:outline-none focus:ring-2 focus:ring-[#e7b98a]"
-                      value={refineValue}
-                      onChange={e => setRefineValue(e.target.value)}
+                <div className="text-[#e7b98a] text-xl font-bold mb-2 flex items-center gap-2">
+                  QuickTake <Sparkles className="inline h-5 w-5 mb-1 text-[#e7b98a]" />
+                  <button
+                    onClick={() => { setEditingQuickTake(true); setEditQuickTakeValue(quickTakePrompt || ''); }}
+                    className="ml-2 p-1 rounded hover:bg-[#f3cfa1] focus:outline-none"
+                    title="Edit QuickTake"
+                  >
+                    <Pencil className="h-5 w-5 text-[#e7b98a]" />
+                  </button>
+                </div>
+                {editingQuickTake ? (
+                  <div className="w-full max-w-2xl flex flex-col items-center mb-4">
+                    <Textarea
+                      className="w-full min-h-[60px] rounded-md border border-[#e7b98a] p-3 text-base mb-2 focus:outline-none focus:ring-2 focus:ring-[#e7b98a]"
+                      value={editQuickTakeValue}
+                      onChange={e => setEditQuickTakeValue(e.target.value)}
                       autoFocus
                     />
                     <div className="flex gap-4">
-                      <Button onClick={handleUpdateRefine} className="bg-[#e7b98a] text-[#3a2415] font-bold hover:bg-[#f3cfa1]">Update</Button>
-                      <Button onClick={handleCancelRefine} variant="outline" className="border-[#e7b98a] text-[#e7b98a] hover:bg-[#2a211d]">Cancel</Button>
+                      <Button onClick={() => { setQuickTakePrompt(editQuickTakeValue); setEditingQuickTake(false); }} className="bg-[#e7b98a] text-[#3a2415] font-bold hover:bg-[#f3cfa1]">Save</Button>
+                      <Button onClick={() => setEditingQuickTake(false)} variant="outline" className="border-[#e7b98a] text-[#e7b98a] hover:bg-[#2a211d]">Cancel</Button>
                     </div>
-                  </>
+                  </div>
+                ) : refining ? (
+                  <div className="flex gap-4">
+                    <Button onClick={handleClarify} variant="outline" className="border-[#e7b98a] text-[#e7b98a] hover:bg-[#2a211d]">Refine</Button>
+                    <Button onClick={handleRefine} variant="outline" className="border-[#e7b98a] text-[#e7b98a] hover:bg-[#2a211d]">Refine</Button>
+                  </div>
+                ) : clarifying && clarifyQuestions.length > 0 ? (
+                  <div className="w-full max-w-2xl flex flex-col items-center mb-4">
+                    <div className="mb-4 font-semibold">Please answer the following to refine your prompt:</div>
+                    {clarifyQuestions.map((q, idx) => (
+                      <div key={idx} className="mb-4 w-full">
+                        <label className="block text-base font-medium mb-1">{q}</label>
+                        <input
+                          type="text"
+                          className="w-full border rounded px-3 py-2 text-base"
+                          value={clarifyAnswers[idx] || ''}
+                          onChange={e => handleClarifyAnswerChange(idx, e.target.value)}
+                          placeholder="Type your answer here"
+                        />
+                      </div>
+                    ))}
+                    <div className="flex gap-4 mt-2">
+                      <Button
+                        onClick={handleRefineSubmit}
+                        className="bg-[#e7b98a] text-[#3a2415] font-bold hover:bg-[#f3cfa1]"
+                        disabled={refining || clarifyAnswers.some(ans => !ans.trim())}
+                      >
+                        {refining && <span className="animate-spin mr-2 inline-block">⏳</span>}
+                        Refine
+                      </Button>
+                      <Button onClick={() => setClarifying(false)} variant="outline" className="border-[#e7b98a] text-[#e7b98a] hover:bg-[#2a211d]" disabled={refining}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : clarifying && clarifyQuestions.length === 0 ? (
+                  <div className="mb-4 text-red-500">No clarification questions received. Please try again.</div>
                 ) : (
                   <>
                     <div className="text-center text-lg font-medium max-w-2xl mb-4" style={{ color: '#111' }}>{quickTakePrompt}</div>
                     {!responses ? (
                       <div className="flex gap-4">
                         <Button onClick={handleGoAhead} className="bg-[#e7b98a] text-[#3a2415] font-bold hover:bg-[#f3cfa1]">Go Ahead</Button>
-                        <Button onClick={handleRefine} variant="outline" className="border-[#e7b98a] text-[#e7b98a] hover:bg-[#2a211d]">Edit</Button>
+                        <Button onClick={handleClarify} variant="outline" className="border-[#e7b98a] text-[#e7b98a] hover:bg-[#2a211d]">Refine</Button>
                       </div>
                     ) : (
                       <div className="flex gap-4">
                         <Button disabled className="bg-[#e7b98a] text-[#3a2415] font-bold">Go Ahead</Button>
-                        <Button disabled variant="outline" className="border-[#e7b98a] text-[#e7b98a]">Edit</Button>
+                        <Button disabled variant="outline" className="border-[#e7b98a] text-[#e7b98a]">Refine</Button>
                       </div>
                     )}
                   </>
@@ -481,7 +744,7 @@ export default function ReasoningPage() {
                   content={responses.response2}
                   selectedCard={selectedCard}
                   onSelect={handleSelectResponse}
-                  contentClassName="font-code"
+                  contentClassName="font-body"
                 />
               </div>
 
@@ -594,7 +857,9 @@ function ResponseCard({ title, content, index, selectedCard, onSelect, contentCl
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-grow">
-        <p className={cn("text-base leading-relaxed", contentClassName)}>{content}</p>
+        <div className={cn("prose max-w-none", contentClassName)}>
+          <ReactMarkdown>{content}</ReactMarkdown>
+        </div>
       </CardContent>
       <CardFooter className="flex-col items-center justify-center gap-4 pt-4">
         {!selectionMade && (
@@ -709,29 +974,29 @@ function ModelDropdown({ selected, onSelect }: { selected: string; onSelect: (va
       value: 'OpenAI o1-mini|Groq Deepseek',
       color: 'text-[#d12b7c]',
       icon: <Waves className="w-5 h-5 text-[#d12b7c] mr-2" />, // MiniMax
-      main: 'OpenAI o1-mini',
-      sub: 'Groq Deepseek',
+      main: 'openai',
+      sub: 'groq',
     },
     {
       value: 'Groq Deepseek|Nvidia A100',
       color: 'text-[#3b82f6]',
       icon: <CircleDot className="w-5 h-5 text-[#3b82f6] mr-2" />, // DeepSeek
-      main: 'Groq Deepseek',
-      sub: 'Nvidia A100',
+      main: 'groq',
+      sub: 'nvidia',
     },
     {
       value: 'Nvidia A100|Google Gemini 2.0',
       color: 'text-[#b3a16c]',
       icon: <Triangle className="w-5 h-5 text-[#b3a16c] mr-2" />, // FLUX
-      main: 'Nvidia A100',
-      sub: 'Google Gemini 2.0',
+      main: 'nvidia',
+      sub: 'gemini',
     },
     {
       value: 'Google Gemini 2.0|OpenAi o1-mini',
       color: 'text-[#b37c5a]',
       icon: <Sun className="w-5 h-5 text-[#b37c5a] mr-2" />, // Arcee/Claude
-      main: 'Google Gemini 2.0',
-      sub: 'OpenAi o1-mini',
+      main: 'gemini',
+      sub: 'openai',
     },
   ];
   useEffect(() => {
