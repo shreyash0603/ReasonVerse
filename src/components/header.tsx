@@ -15,6 +15,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { ReasonVerseLogo } from './icons';
 import { Coins, LogOut, User, Menu } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import React, { useState, useRef, useEffect } from "react";
 
 function AuthButton() {
   const { isAuthenticated, user, logout } = useAuth();
@@ -65,6 +66,91 @@ function AuthButton() {
     <Button onClick={() => router.push('/login')}>
       Login / Sign Up
     </Button>
+  );
+}
+
+const promptOptions = [
+  {
+    label: "Standard Prompt",
+    description: "Recommended for most tasks",
+    value: "standard",
+  },
+  {
+    label: "Reasoning Prompt",
+    description: "For reasoning tasks (OpenAI o3 model)",
+    value: "reasoning",
+  },
+  {
+    label: "Deep Research Prompt",
+    description: "For web-based research",
+    value: "deep-research",
+  },
+  {
+    label: "Custom GPT/Agent Prompt",
+    description: "Design your own Custom GPTs or AI Agents",
+    value: "custom",
+  },
+];
+
+export interface PromptDropdownProps {
+  selected: string;
+  onSelect: (value: string) => void;
+}
+
+export function PromptDropdown({ selected, onSelect }: PromptDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && event.target instanceof Node && ref.current.contains) {
+        if (!ref.current.contains(event.target)) {
+          setOpen(false);
+        }
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const current = promptOptions.find((opt) => opt.value === selected) || promptOptions[0];
+
+  return (
+    <div className="relative w-72" ref={ref}>
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 transition"
+        onClick={() => setOpen((o) => !o)}
+        type="button"
+      >
+        <div>
+          <div className="font-semibold">{current.label}</div>
+          <div className="text-xs text-gray-500">{current.description}</div>
+        </div>
+        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-10 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg">
+          {promptOptions.map((option) => (
+            <button
+              key={option.value}
+              className={`w-full text-left px-4 py-3 hover:bg-gray-100 ${
+                option.value === selected ? "bg-gray-100" : ""
+              }`}
+              onClick={() => {
+                onSelect(option.value);
+                setOpen(false);
+              }}
+              type="button"
+            >
+              <div className="font-semibold">{option.label}</div>
+              <div className="text-xs text-gray-500">{option.description}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

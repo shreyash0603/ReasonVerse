@@ -4,6 +4,9 @@ import dotenv from 'dotenv';
 import chatRoutes from './routes/chatRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import connectDB from './config/db.js';
+// import geminiEnhanceRoutes from './routes/geminiEnhance.js';
+import groqEnhanceRoutes from './routes/groqEnhance.js';
+import enhancePromptRoutes from './routes/enhancePrompt.js';
 
 dotenv.config();
 
@@ -27,6 +30,10 @@ app.use(cors({
 
 app.use('/api/chat/', chatRoutes);
 app.use('/api/auth/', authRoutes);
+
+app.use('/api/groq/', groqEnhanceRoutes);
+app.use('/api/enhance/', enhancePromptRoutes);
+// app.use('/api/gemini/', geminiEnhanceRoutes);
 
 connectDB();
 
