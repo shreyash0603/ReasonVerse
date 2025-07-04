@@ -3,7 +3,8 @@
 ReasonVerse is a modern web application for comparing and evaluating AI-generated responses to complex queries. It leverages dual LLMs (Large Language Models), a token reward system, and a clean, intuitive interface to foster critical thinking and multi-perspective reasoning.
 
 ---
-![App ScreenShot](image.png)
+![App ScreenShot]()
+![Screenshot 2025-07-04 195518](https://github.com/user-attachments/assets/b9c539ba-3bbf-4fec-a418-68bef1fa6d1f)
 
 ## Features
 
